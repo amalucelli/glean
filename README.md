@@ -1,0 +1,98 @@
+# glean
+
+Incremental change tracking for skills. Run an AI cleanup or quality pass only over what changed, the way a linter does.
+
+## Why it exists
+
+A **skill** can act as a linter for an AI agent. Where you once ran a formatter or a linter over your code to hold a quality bar, you can now run a skill: a loop that strips slop or simplifies code on every tick.
+
+A linter has one trick a skill doesn't. It can look at what changed. Linters, formatters, and pre-commit hooks all lean on git to scope themselves to the files you touched. Run a skill the naive way and it has no such memory. Every tick it re-processes the whole working-tree diff, redoing files it already cleaned and getting slower by the minute.
+
+`glean` gives a skill that memory. It's a watcher: the skill asks "what changed since I last ran?", touches only that, and records what it processed. Each skill keeps its own baseline, so several passes — comments, code smells, simplification — watch the same tree at once without redoing each other's work.
+
+## Install
+
+```sh
+cargo install --path . --root ~/.local   # → ~/.local/bin/glean
+```
+
+Install under any prefix on your `PATH`. The skills that call `glean` need to resolve it by name.
+
+## Usage
+
+```
+glean list   [--as <consumer>]            files changed since this consumer's last mark
+glean mark   [--as <consumer>] [paths…]   record files as processed (no paths = the whole changed set)
+glean status [--as <consumer>]            counts; with no --as, summarize every consumer
+glean reset  [--as <consumer>] [--all]    forget a baseline to force a full re-sweep
+```
+
+A *consumer* is one skill (or tool) with its own baseline. `--as` names it; it defaults to `default`.
+
+```sh
+$ glean list --as slop        # what has changed since slop last ran?
+src/auth.rs
+src/db.rs
+
+# ... slop processes those two files ...
+
+$ glean mark --as slop src/auth.rs src/db.rs   # record them as done
+
+$ glean list --as slop         # nothing new since
+$
+```
+
+## A skill on a loop
+
+This is the case it's built for: point a recurring loop at a skill and it only ever touches new edits. In Claude Code the skill calls `glean` itself, so you run `/loop 5m /glean /slop`. It's the same wiring as a plain shell loop around any tool:
+
+```sh
+while true; do
+  files=$(glean list --as slop)
+  if [ -n "$files" ]; then
+    run-the-pass $files          # a skill, a linter, a formatter — anything that takes paths
+    glean mark --as slop $files
+  fi
+  sleep 300
+done
+```
+
+Mark only what succeeded. If a pass fails on a file, leave it out of `mark` and it comes back next tick.
+
+## Multiple skills, one tree
+
+Each consumer has its own baseline, so independent skills (or parallel agent loops) watch the same repo at once:
+
+```sh
+glean list --as slop        # code smells — same tree, independent baseline
+glean list --as simplify    # structure
+glean list --as check       # type checking
+```
+
+When a file changes, every skill that hasn't seen those exact bytes picks it up, so each pass also re-checks files the others edited, through its own lens. A pass that finds nothing to do is a cheap no-op.
+
+## Claude Code
+
+`glean` ships a companion skill, `/glean`, that wraps any other skill to run incrementally. It scopes `<skill>` to what changed since it last ran, invokes it, and records the result. Point a loop at it:
+
+```
+/loop 2m /glean slop         # slop only new edits, every 5 minutes
+/loop 5m /glean simplify     # works with built-in skills too
+```
+
+The wrapped skill must accept file paths as arguments (most cleanup skills do). Install the companion skill where Claude Code looks for it:
+
+```sh
+mkdir -p ~/.claude/skills
+cp -r .claude/skills/glean ~/.claude/skills/
+```
+
+The skill is at [`.claude/skills/glean/SKILL.md`](.claude/skills/glean/SKILL.md).
+
+## How it works
+
+- **Content-based, not mtime.** A file counts as changed when its bytes hash differently from the recorded baseline, so it survives rebases, branch switches, and formatters that bump mtimes without touching content.
+- **Scales with the diff, not the repo.** The candidate set is only the changed and untracked files (`git diff HEAD` + `git ls-files --others`), so a giant monorepo with a handful of edits costs a handful of reads. On huge trees, enable git's `core.fsmonitor` and `core.untrackedCache` and glean inherits the speedup.
+- **State in `.git`.** Baselines live in `.git/glean/<consumer>.json`: never committed, scoped to the repo, separate per worktree. Git can't track its own dir, so the state can't leak, and because `glean` reads the tree through `git diff` and `git ls-files` (which both ignore `.git/`), it never sees its own state. The state persists across runs, which is what makes it incremental, and dies with the repo. `glean reset --all` wipes a repo's baselines; different worktrees get their own automatically.
+- **No coordination.** Each consumer is the sole writer of its own file, so independent consumers run against the same tree without locks.
+- **Skips noise.** Lockfiles (`Cargo.lock`, `package-lock.json`, `go.sum`, …) and binary files never appear in `list`.

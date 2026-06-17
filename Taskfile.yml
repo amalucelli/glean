@@ -1,0 +1,36 @@
+# https://taskfile.dev
+version: "3"
+silent: true
+
+tasks:
+  build:
+    desc: Build the release binary
+    cmds:
+      - cargo build --release
+
+  install:
+    desc: Install glean to ~/.cargo/bin
+    cmds:
+      - cargo install --path . --root ~/.local
+
+  fmt:
+    desc: Format the code
+    cmds:
+      - cargo fmt
+
+  lint:
+    desc: Lint with clippy
+    cmds:
+      - cargo clippy --all-targets -- -D warnings
+
+  test:
+    desc: Run the test suite
+    cmds:
+      - cargo test
+
+  check:
+    desc: Format check, lint, and test
+    cmds:
+      - cargo fmt --check
+      - cargo clippy --all-targets -- -D warnings
+      - cargo test
