@@ -1,18 +1,16 @@
 # glean
 
-Incremental change tracking for skills. Run an AI cleanup or quality pass only over what changed, the way a linter does.
+Incremental change tracking for skills. Run a skill cleanup or quality pass only over what changed, the way a linter does.
 
 ## Why it exists
 
-A **skill** can act as a linter for an AI agent. Where you once ran a formatter or a linter over your code to hold a quality bar, you can now run a skill: a loop that strips slop or simplifies code on every tick.
+A skill can act as a linter for an AI agent — a loop that strips slop or simplifies code every tick. But a linter scopes itself to what changed; a skill run naively has no such memory, so every tick re-processes the whole working-tree diff and redoes files it already cleaned.
 
-A linter has one trick a skill doesn't. It can look at what changed. Linters, formatters, and pre-commit hooks all lean on git to scope themselves to the files you touched. Run a skill the naive way and it has no such memory. Every tick it re-processes the whole working-tree diff, redoing files it already cleaned and getting slower by the minute.
-
-`glean` gives a skill that memory. It's a watcher: the skill asks "what changed since I last ran?", touches only that, and records what it processed. Each skill keeps its own baseline, so several passes — comments, code smells, simplification — watch the same tree at once without redoing each other's work.
+`glean` gives a skill that memory. The skill asks "what changed since I last ran?", touches only that, and records what it processed. Each skill keeps its own baseline, so several passes watch the same tree at once without redoing each other's work.
 
 ## Why not just git?
 
-`git` tracks changes against commits; `glean` tracks how far each consumer has gotten since it last ran. That per-consumer cursor is all `glean` adds — it leans on git for the diffing and does none of its own. It can't live in commits: a loop ticks many times between them, over uncommitted work — staged, unstaged, untracked — that parallel agents haven't committed yet and are still working on, and each skill needs its own place in that stream without clobbering the others'. `glean` keeps that baseline per consumer, anchored on file content, inside `.git` and never in history.
+`git` tracks changes against commits; `glean` tracks how far each consumer has gotten since it last ran. That per-consumer cursor is all `glean` adds — it leans on git for the diffing and does none of its own. It can't live in commits: a loop ticks many times between them, over uncommitted work that parallel agents are still editing, and each skill needs its own place in that stream. `glean` keeps that cursor per consumer, anchored on file content, inside `.git` and never in history.
 
 ## Claude Code
 
@@ -63,6 +61,15 @@ $ glean mark --as slop src/auth.rs src/db.rs   # record them as done
 $ glean list --as slop         # nothing new since
 $
 ```
+
+## Scope vs cursor
+
+"What changed" hides two jobs, and `glean` owns one:
+
+- **Scope** — what's in play for a run: uncommitted edits, or a whole branch against a ref. git answers this directly (`git diff HEAD`, `git diff <branch>`), and a skill that lints branch changes works it out itself.
+- **Cursor** — has this consumer already processed these exact bytes? The per-consumer baseline — all `glean` adds.
+
+`glean` is for the uncommitted loop, where the working tree churns between ticks and the cursor skips files already cleaned. Committed work is the opposite: the file set (`git diff <ref>`) is static and swept once before a PR, so the cursor adds nothing. That work is git's to scope, run through the skill's own branch mode (`/slop main`) — `glean` has no base flag, by design.
 
 ## A skill on a loop
 
