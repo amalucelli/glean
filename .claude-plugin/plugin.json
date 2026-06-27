@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "glean",
+  "version": "0.1.0",
+  "description": "Incremental change tracking for skills — run a cleanup or quality pass only over what changed, the way a linter does.",
+  "author": {
+    "name": "Alexandre Guimarães Malucelli",
+    "email": "alexandre@malucelli.net"
+  },
+  "homepage": "https://github.com/amalucelli/glean",
+  "repository": "https://github.com/amalucelli/glean",
+  "license": "MIT"
+}

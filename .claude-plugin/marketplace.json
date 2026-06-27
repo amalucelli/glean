@@ -1,0 +1,14 @@
+{
+  "name": "glean",
+  "owner": {
+    "name": "Alexandre Guimarães Malucelli",
+    "email": "alexandre@malucelli.net"
+  },
+  "plugins": [
+    {
+      "name": "glean",
+      "source": "./",
+      "description": "Incremental change tracking for skills — run a cleanup or quality pass only over what changed, the way a linter does."
+    }
+  ]
+}

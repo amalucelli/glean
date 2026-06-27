@@ -5,12 +5,14 @@
 // committed, keyed per consumer so concurrent consumers are each the sole writer
 // of their own file and no locking is needed.
 
+mod mcp;
+
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::Hasher;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -39,12 +41,38 @@ struct State {
     clean: BTreeMap<String, String>,
 }
 
-fn main() -> Result<()> {
+#[derive(Serialize)]
+struct ConsumerStatus {
+    consumer: String,
+    tracked: usize,
+    changed: usize,
+}
+
+fn main() {
+    let code = match run() {
+        Ok(code) => code,
+        // Runtime failures exit 2 so `list -q`'s exit 1 stays an unambiguous
+        // "no changes" signal and never collides with an error.
+        Err(err) => {
+            eprintln!("error: {err:#}");
+            2
+        }
+    };
+    std::process::exit(code);
+}
+
+fn run() -> Result<i32> {
     let mut consumer = "default".to_string();
     let mut explicit_consumer = false;
     let mut all = false;
+    let mut null = false;
+    let mut quiet = false;
+    let mut stdin = false;
+    let mut json = false;
+    let mut each = false;
     let mut subcommand: Option<String> = None;
     let mut paths: Vec<String> = Vec::new();
+    let mut command: Vec<String> = Vec::new();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -54,104 +82,123 @@ fn main() -> Result<()> {
                 explicit_consumer = true;
             }
             "--all" => all = true,
+            "-z" | "--null" => null = true,
+            "-q" | "--quiet" => quiet = true,
+            "--stdin" => stdin = true,
+            "--json" => json = true,
+            "--each" => each = true,
+            // Everything past `--` is the verbatim command for `run`.
+            "--" => {
+                command.extend(args.by_ref());
+                break;
+            }
             _ if subcommand.is_none() => subcommand = Some(arg),
             _ => paths.push(arg),
         }
     }
 
     match subcommand.as_deref() {
-        Some("list") => list(&consumer),
-        Some("mark") => mark(&consumer, &paths),
-        Some("status") => status(&consumer, explicit_consumer),
+        Some("list") => list(&consumer, null, quiet, json),
+        Some("mark") => mark(&consumer, &paths, stdin, null),
+        Some("status") => status(&consumer, explicit_consumer, json),
         Some("reset") => reset(&consumer, all),
-        _ => {
-            eprintln!("usage: glean <list|mark|status|reset> [--as <consumer>] [--all] [paths...]");
-            std::process::exit(2);
-        }
+        Some("run") => run_cmd(&consumer, each, &command),
+        Some("mcp") => mcp::serve(),
+        _ => Ok(usage()),
     }
 }
 
-fn list(consumer: &str) -> Result<()> {
-    let repo = Repo::discover(consumer)?;
-    let state = repo.load_state();
-    let current = repo.current_hashes()?;
-    for path in Repo::changed_paths(&current, &state) {
-        println!("{path}");
-    }
-    Ok(())
+fn usage() -> i32 {
+    eprintln!(
+        "usage: glean <list|mark|status|reset|run|mcp> [--as <consumer>] [options] [paths...]\n\
+         \n\
+         list    [--as <name>] [-z|--null] [-q|--quiet] [--json]\n\
+         mark    [--as <name>] [--stdin] [-z|--null] [paths...]\n\
+         status  [--as <name>] [--json]\n\
+         reset   [--as <name>] [--all]\n\
+         run     [--as <name>] [--each] -- <cmd> [args...]\n\
+         mcp"
+    );
+    2
 }
 
-fn mark(consumer: &str, paths: &[String]) -> Result<()> {
+fn list(consumer: &str, null: bool, quiet: bool, json: bool) -> Result<i32> {
+    if null && json {
+        eprintln!("error: --null and --json are mutually exclusive");
+        return Ok(2);
+    }
     let repo = Repo::discover(consumer)?;
-    let mut state = repo.load_state();
+    let changed = repo.changed()?;
 
-    let candidates: HashSet<String> = repo.candidates()?.into_iter().collect();
-
-    let mut marked = 0usize;
-    let mut just_marked = HashSet::new();
-    if paths.is_empty() {
-        // Mark from the change-detection pass directly so each file is read once.
-        for path in &candidates {
-            if let Some(hash) = repo.hash_file(path) {
-                just_marked.insert(path.clone());
-                if state.clean.get(path) != Some(&hash) {
-                    state.clean.insert(path.clone(), hash);
-                    marked += 1;
-                }
-            }
+    if quiet {
+        return Ok(if changed.is_empty() { 1 } else { 0 });
+    }
+    if json {
+        println!("{}", serde_json::to_string(&changed)?);
+    } else if null {
+        let mut out = std::io::stdout().lock();
+        for path in &changed {
+            out.write_all(path.as_bytes())?;
+            out.write_all(b"\0")?;
         }
     } else {
-        for path in paths {
-            match repo.hash_file(path) {
-                Some(hash) => {
-                    state.clean.insert(path.clone(), hash);
-                    just_marked.insert(path.clone());
-                    marked += 1;
-                }
-                None => {
-                    state.clean.remove(path);
-                }
-            }
+        for path in &changed {
+            println!("{path}");
         }
     }
-
-    // An entry only affects `list` when its path is a current candidate, so
-    // dropping non-candidates can't change what `list` reports; the worst case
-    // is a re-marked-identical file getting one extra no-op pass. Keeping
-    // just-marked paths covers selective marks of files git doesn't surface.
-    state
-        .clean
-        .retain(|path, _| candidates.contains(path) || just_marked.contains(path));
-
-    repo.save_state(&state)?;
-    eprintln!("marked {marked} files");
-    Ok(())
+    Ok(0)
 }
 
-fn status(consumer: &str, explicit_consumer: bool) -> Result<()> {
+fn mark(consumer: &str, paths: &[String], stdin: bool, null: bool) -> Result<i32> {
     let repo = Repo::discover(consumer)?;
-    let current = repo.current_hashes()?;
+    let marked = if stdin {
+        let paths = read_stdin_paths(null)?;
+        // A piped selection of nothing marks nothing; only a bare `mark` with no
+        // selection at all falls through to "the whole changed set".
+        if paths.is_empty() {
+            0
+        } else {
+            repo.mark_paths(&paths)?
+        }
+    } else {
+        repo.mark_paths(paths)?
+    };
+    eprintln!("marked {marked} files");
+    Ok(0)
+}
 
+fn status(consumer: &str, explicit_consumer: bool, json: bool) -> Result<i32> {
+    let repo = Repo::discover(consumer)?;
     let names = if explicit_consumer {
         vec![consumer.to_string()]
     } else {
         let consumers = repo.consumers()?;
         if consumers.is_empty() {
-            println!("no glean state for any consumer");
-            return Ok(());
+            if json {
+                println!("[]");
+            } else {
+                println!("no glean state for any consumer");
+            }
+            return Ok(0);
         }
         consumers
     };
 
-    for name in names {
-        let state = repo.load_state_for(&name);
-        let changed = Repo::changed_paths(&current, &state).len();
-        println!("{name}: {} tracked, {changed} changed", state.clean.len());
+    let statuses = repo.status_for(&names)?;
+    if json {
+        println!("{}", serde_json::to_string(&statuses)?);
+    } else {
+        for s in &statuses {
+            println!(
+                "{}: {} tracked, {} changed",
+                s.consumer, s.tracked, s.changed
+            );
+        }
     }
-    Ok(())
+    Ok(0)
 }
 
-fn reset(consumer: &str, all: bool) -> Result<()> {
+fn reset(consumer: &str, all: bool) -> Result<i32> {
     let repo = Repo::discover(consumer)?;
     if all {
         // Drop the whole dir, not just the files, so nothing lingers in .git.
@@ -159,13 +206,74 @@ fn reset(consumer: &str, all: bool) -> Result<()> {
         if std::fs::remove_dir_all(&dir).is_ok() {
             eprintln!("removed {}", dir.display());
         }
-        return Ok(());
+        return Ok(0);
     }
     let path = repo.state_path(consumer);
     if std::fs::remove_file(&path).is_ok() {
         eprintln!("removed {}", path.display());
     }
-    Ok(())
+    Ok(0)
+}
+
+// Snapshot the changed set once, run the command on it, mark on success. One
+// process means no window between deciding the work and recording it done.
+fn run_cmd(consumer: &str, each: bool, command: &[String]) -> Result<i32> {
+    if command.is_empty() {
+        return Ok(usage());
+    }
+    let repo = Repo::discover(consumer)?;
+    let files = repo.changed()?;
+    if files.is_empty() {
+        return Ok(0);
+    }
+
+    if each {
+        // Per-file so a clean file settles while a failing one keeps coming back,
+        // instead of one bad file pinning the whole batch as unprocessed.
+        let mut ok = Vec::new();
+        for file in &files {
+            if spawn(command, std::slice::from_ref(file))?.success() {
+                ok.push(file.clone());
+            }
+        }
+        let marked = if ok.is_empty() {
+            0
+        } else {
+            repo.mark_paths(&ok)?
+        };
+        eprintln!("marked {marked} files");
+        Ok(if ok.len() == files.len() { 0 } else { 1 })
+    } else {
+        let status = spawn(command, &files)?;
+        if status.success() {
+            let marked = repo.mark_paths(&files)?;
+            eprintln!("marked {marked} files");
+        }
+        // A signal-killed child has no code; treat it as a generic failure.
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+fn spawn(command: &[String], files: &[String]) -> Result<std::process::ExitStatus> {
+    Command::new(&command[0])
+        .args(&command[1..])
+        .args(files)
+        .status()
+        .with_context(|| format!("running {}", command[0]))
+}
+
+fn read_stdin_paths(null: bool) -> Result<Vec<String>> {
+    let mut buf = Vec::new();
+    std::io::stdin()
+        .read_to_end(&mut buf)
+        .context("reading stdin")?;
+    let text = String::from_utf8_lossy(&buf);
+    let sep = if null { '\0' } else { '\n' };
+    Ok(text
+        .split(sep)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 struct Repo {
@@ -209,6 +317,72 @@ impl Repo {
             .filter(|(path, hash)| state.clean.get(*path) != Some(*hash))
             .map(|(path, _)| path.clone())
             .collect()
+    }
+
+    // Sorted paths whose current contents differ from this consumer's baseline.
+    fn changed(&self) -> Result<Vec<String>> {
+        let current = self.current_hashes()?;
+        Ok(Self::changed_paths(&current, &self.load_state()))
+    }
+
+    // Records paths as processed and returns how many baselines moved. Empty
+    // `paths` marks the whole current candidate set.
+    fn mark_paths(&self, paths: &[String]) -> Result<usize> {
+        let mut state = self.load_state();
+        let candidates: HashSet<String> = self.candidates()?.into_iter().collect();
+
+        let mut marked = 0usize;
+        let mut just_marked = HashSet::new();
+        if paths.is_empty() {
+            // Mark from the change-detection pass directly so each file is read once.
+            for path in &candidates {
+                if let Some(hash) = self.hash_file(path) {
+                    just_marked.insert(path.clone());
+                    if state.clean.get(path) != Some(&hash) {
+                        state.clean.insert(path.clone(), hash);
+                        marked += 1;
+                    }
+                }
+            }
+        } else {
+            for path in paths {
+                match self.hash_file(path) {
+                    Some(hash) => {
+                        state.clean.insert(path.clone(), hash);
+                        just_marked.insert(path.clone());
+                        marked += 1;
+                    }
+                    None => {
+                        state.clean.remove(path);
+                    }
+                }
+            }
+        }
+
+        // An entry only affects `list` when its path is a current candidate, so
+        // dropping non-candidates can't change what `list` reports; the worst case
+        // is a re-marked-identical file getting one extra no-op pass. Keeping
+        // just-marked paths covers selective marks of files git doesn't surface.
+        state
+            .clean
+            .retain(|path, _| candidates.contains(path) || just_marked.contains(path));
+
+        self.save_state(&state)?;
+        Ok(marked)
+    }
+
+    fn status_for(&self, names: &[String]) -> Result<Vec<ConsumerStatus>> {
+        let current = self.current_hashes()?;
+        let mut out = Vec::with_capacity(names.len());
+        for name in names {
+            let state = self.load_state_for(name);
+            out.push(ConsumerStatus {
+                consumer: name.clone(),
+                tracked: state.clean.len(),
+                changed: Self::changed_paths(&current, &state).len(),
+            });
+        }
+        Ok(out)
     }
 
     fn candidates(&self) -> Result<Vec<String>> {

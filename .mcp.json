@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "glean": {
+      "command": "glean",
+      "args": ["mcp"]
+    }
+  }
+}
