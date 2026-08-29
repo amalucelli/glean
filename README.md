@@ -1,4 +1,4 @@
-<img width="116" alt="glean" src="https://raw.githubusercontent.com/amalucelli/glean/main/assets/logo.png" />
+<img width="170" alt="glean" src="https://raw.githubusercontent.com/amalucelli/glean/main/assets/logo.png" />
 
 # glean
 
