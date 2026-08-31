@@ -34,3 +34,21 @@ tasks:
       - cargo fmt --check
       - cargo clippy --all-targets -- -D warnings
       - cargo test
+
+  snapshot:
+    desc: Build the release artifacts locally without tagging or publishing
+    cmds:
+      - goreleaser release --snapshot --clean --skip=publish
+
+  release:
+    desc: Tag and publish a release, e.g. task release TAG=v0.1.0
+    requires:
+      vars: [TAG]
+    env:
+      GITHUB_TOKEN:
+        sh: gh auth token
+    cmds:
+      # goreleaser reads the tag from the remote, so it has to be pushed first.
+      - git tag {{.TAG}}
+      - git push --follow-tags
+      - goreleaser release --clean

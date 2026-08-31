@@ -14,6 +14,12 @@
 A single Rust binary. The `/glean` skill and the MCP server both resolve it by name on `PATH`:
 
 ```sh
+brew install --cask amalucelli/tap/glean
+```
+
+Or from source:
+
+```sh
 cargo install --path . --root ~/.local   # → ~/.local/bin/glean
 ```
 

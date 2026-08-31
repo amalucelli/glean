@@ -1,0 +1,52 @@
+version: 2
+
+project_name: glean
+
+builds:
+  # Split by OS rather than one zigbuild block for everything: the release runs on macOS,
+  # where the Apple targets build with the native toolchain and only the Linux ones need
+  # zig to supply a glibc.
+  - id: darwin
+    builder: rust
+    tool: cargo
+    command: build
+    targets:
+      - aarch64-apple-darwin
+      - x86_64-apple-darwin
+
+  - id: linux
+    builder: rust
+    targets:
+      - aarch64-unknown-linux-gnu
+      - x86_64-unknown-linux-gnu
+
+homebrew_casks:
+  - name: glean
+    description: "Track which files changed since a tool last processed them — incremental work for loops, CI, and agents."
+    homepage: https://github.com/amalucelli/glean
+    repository:
+      owner: amalucelli
+      name: homebrew-tap
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/glean"]
+          end
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^doc:'
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+  groups:
+    - title: 'New Features'
+      regexp: "^.*feat:+.*$"
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: "^.*fix:+.*$"
+      order: 1
