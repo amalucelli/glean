@@ -37,6 +37,9 @@ homebrew_casks:
 changelog:
   sort: asc
   use: github
+  # The default template falls back to name and email when no GitHub account
+  # resolves for the commit author — drop the attribution instead.
+  format: "{{ .SHA }}: {{ .Message }}{{ with .Author.Username }} (@{{ . }}){{ end }}"
   filters:
     exclude:
       - '^doc:'
