@@ -49,6 +49,6 @@ tasks:
         sh: gh auth token
     cmds:
       # goreleaser reads the tag from the remote, so it has to be pushed first.
-      - git tag {{.TAG}}
+      - git tag -a {{.TAG}} -m {{.TAG}}
       - git push --follow-tags
       - goreleaser release --clean

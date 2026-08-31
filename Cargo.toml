@@ -1,6 +1,6 @@
 [package]
 name = "glean"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Track which files changed since a tool last processed them — incremental work for loops, CI, and agents."
 authors = ["Alexandre Malucelli <alexandre@malucelli.net>"]
