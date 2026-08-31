@@ -544,3 +544,12 @@ fn run_each_gates_per_file() {
         "only the failing file stays unprocessed; the passing one settles"
     );
 }
+
+// Outside a git repo: the version must not depend on repo discovery, which every
+// other subcommand needs.
+#[test]
+fn reports_version_without_a_repo() {
+    let (out, status) = glean(&std::env::temp_dir(), &["--version"]);
+    assert!(status.success());
+    assert_eq!(out.trim(), format!("glean {}", env!("CARGO_PKG_VERSION")));
+}

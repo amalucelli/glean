@@ -87,6 +87,10 @@ fn run() -> Result<i32> {
             "--stdin" => stdin = true,
             "--json" => json = true,
             "--each" => each = true,
+            "-v" | "--version" => {
+                println!("glean {}", env!("CARGO_PKG_VERSION"));
+                return Ok(0);
+            }
             // Everything past `--` is the verbatim command for `run`.
             "--" => {
                 command.extend(args.by_ref());
@@ -117,7 +121,9 @@ fn usage() -> i32 {
          status  [--as <name>] [--json]\n\
          reset   [--as <name>] [--all]\n\
          run     [--as <name>] [--each] -- <cmd> [args...]\n\
-         mcp"
+         mcp\n\
+         \n\
+         -v, --version"
     );
     2
 }
