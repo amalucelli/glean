@@ -10,6 +10,8 @@ tasks:
 
   install:
     desc: Install glean to ~/.cargo/bin
+    env:
+      GLEAN_DIRTY: "1"
     cmds:
       - cargo install --path . --root ~/.local
 

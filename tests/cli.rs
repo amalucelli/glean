@@ -547,9 +547,57 @@ fn run_each_gates_per_file() {
 
 // Outside a git repo: the version must not depend on repo discovery, which every
 // other subcommand needs.
+// Both spellings, since the short flag is -v rather than clap's default -V.
 #[test]
 fn reports_version_without_a_repo() {
-    let (out, status) = glean(&std::env::temp_dir(), &["--version"]);
+    for flag in ["--version", "-v"] {
+        let (out, status) = glean(&std::env::temp_dir(), &[flag]);
+        assert!(status.success(), "{flag} exits 0");
+        assert_eq!(out.trim(), format!("glean {}", env!("CARGO_PKG_VERSION")));
+    }
+}
+
+#[test]
+fn help_lists_every_subcommand() {
+    let (out, status) = glean(&std::env::temp_dir(), &["--help"]);
+    assert!(status.success(), "--help exits 0");
+    for sub in ["list", "mark", "status", "reset", "run", "mcp"] {
+        assert!(out.contains(sub), "--help omits {sub}:\n{out}");
+    }
+}
+
+#[test]
+fn consumer_flag_is_global() {
+    let repo = mk_repo("consumer_flag_is_global");
+    let dir = repo.path();
+
+    write(dir, "a.txt", b"a\n");
+    glean(dir, &["--as=x", "mark"]);
+
+    let (out, status) = glean(dir, &["status", "--as=x", "--json"]);
     assert!(status.success());
-    assert_eq!(out.trim(), format!("glean {}", env!("CARGO_PKG_VERSION")));
+    assert_eq!(out.trim(), r#"[{"consumer":"x","tracked":1,"changed":0}]"#);
+}
+
+// A mistyped flag used to be read as a path, silently dropping that entry from
+// the baseline and reporting success.
+#[test]
+fn unknown_flag_leaves_state_untouched() {
+    let repo = mk_repo("unknown_flag_leaves_state_untouched");
+    let dir = repo.path();
+
+    write(dir, "a.txt", b"a\n");
+    glean(dir, &["mark", "--as", "x"]);
+    let state = PathBuf::from(git_line(dir, &["rev-parse", "--absolute-git-dir"]))
+        .join("glean")
+        .join("x.json");
+    let before = fs::read(&state).expect("read state");
+
+    let (_, status) = glean(dir, &["mark", "--as", "x", "--bogus"]);
+    assert_eq!(status.code(), Some(2), "an unknown flag is a usage error");
+    assert_eq!(
+        fs::read(&state).expect("read state"),
+        before,
+        "the rejected run never reached the state file"
+    );
 }

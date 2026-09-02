@@ -138,7 +138,7 @@ impl ServerHandler for GleanServer {
                 "Per-repo incremental change tracker. Each consumer keeps its own baseline; \
                  list surfaces files changed since it last marked, mark advances it.",
             );
-        info.server_info = Implementation::new("glean", env!("CARGO_PKG_VERSION"));
+        info.server_info = Implementation::new("glean", crate::VERSION);
         info
     }
 }

@@ -26,15 +26,20 @@ cargo install --path . --root ~/.local   # → ~/.local/bin/glean
 ## Usage
 
 ```
-glean list   [--as <consumer>] [-z] [-q] [--json]        files changed since this consumer's last mark
-glean mark   [--as <consumer>] [--stdin] [-z] [paths…]   record files as processed (no paths = the whole changed set)
-glean status [--as <consumer>] [--json]                  counts; with no --as, summarize every consumer
-glean reset  [--as <consumer>] [--all]                   forget a baseline to force a full re-sweep
-glean run    [--as <consumer>] [--each] -- <cmd>…        run <cmd> on the changed files, mark on success
-glean mcp                                                serve the change-set as MCP tools over stdio
+glean <command> [--as <consumer>] [options]
+
+  list   [-z] [-q] [--json]        files changed since this consumer's last mark
+  mark   [--stdin] [-z] [paths…]   record files as processed; with no paths, the whole changed set
+  status [--json]                  tracked and changed counts; with no --as, every consumer
+  reset  [--all]                   forget a baseline to force a full re-sweep
+  run    [--each] -- <cmd>…        run <cmd> on the changed files, marking them when it succeeds
+  mcp                              serve the change-set as MCP tools over stdio
+
+  -v, --version                    print the version
+  -h, --help                       print help; per command with glean <command> --help
 ```
 
-A *consumer* is one skill or tool with its own baseline. `--as` names it; it defaults to `default`.
+A *consumer* is one skill or tool with its own baseline. `--as` names it; it defaults to `default`, and it reads the same before or after the subcommand.
 
 ```sh
 $ glean list --as slop        # what has changed since slop last ran?
@@ -54,6 +59,8 @@ $
 ```sh
 glean list -z --as slop | glean mark --stdin -z --as slop
 ```
+
+The notices (`marked 6 files`, `removed …`, errors) go to stderr, so they stay out of a pipe carrying the change set. On a terminal they and `status`'s counts are coloured; `list` never is, since its output is data. Colour is dropped when the stream is not a terminal, or when `NO_COLOR` is set.
 
 Consumers are independent. When a file changes, every consumer that has not seen those exact bytes picks it up, including files the other passes edited:
 
