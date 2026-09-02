@@ -39,7 +39,7 @@ changelog:
   use: github
   # The default template falls back to name and email when no GitHub account
   # resolves for the commit author — drop the attribution instead.
-  format: "{{ .SHA }}: {{ .Message }}{{ with .Author.Username }} (@{{ . }}){{ end }}"
+  format: "{{ .SHA }}: {{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}"
   filters:
     exclude:
       - '^doc:'
