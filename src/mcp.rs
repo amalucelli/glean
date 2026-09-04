@@ -12,6 +12,7 @@ use rmcp::{schemars, tool, tool_handler, tool_router, ErrorData, Json, ServerHan
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::ink::ago;
 use crate::Repo;
 
 const DEFAULT_CONSUMER: &str = "default";
@@ -62,6 +63,11 @@ struct StatusEntry {
     consumer: String,
     tracked: usize,
     changed: usize,
+    // Rendered relative ("2h ago") rather than as an instant: the reader is a
+    // model deciding whether a sweep is stale, and it has no reliable clock to
+    // subtract a timestamp from.
+    #[schemars(description = "How long ago this consumer last marked, or null if it never has.")]
+    last_marked: Option<String>,
 }
 
 #[derive(Clone)]
@@ -103,7 +109,7 @@ impl GleanServer {
     }
 
     #[tool(
-        description = "Report tracked and changed counts per consumer (all consumers if none given)."
+        description = "Report tracked and changed counts, and how long ago it last marked, per consumer (all consumers if none given)."
     )]
     async fn glean_status(
         &self,
@@ -122,6 +128,7 @@ impl GleanServer {
                     consumer: s.consumer,
                     tracked: s.tracked,
                     changed: s.changed,
+                    last_marked: s.last_marked.map(ago),
                 })
                 .collect())
         })

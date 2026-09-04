@@ -93,7 +93,7 @@ enum Sub {
         #[arg(value_name = "PATH")]
         paths: Vec<String>,
     },
-    /// Tracked and changed counts; with no --as, every consumer
+    /// Counts and last mark time; with no --as, every consumer
     Status {
         /// Write the counts as a JSON array
         #[arg(long)]

@@ -466,7 +466,41 @@ fn status_json_shape() {
 
     let (out, status) = glean(dir, &["status", "--as", "x", "--json"]);
     assert!(status.success());
-    assert_eq!(out.trim(), r#"[{"consumer":"x","tracked":1,"changed":0}]"#);
+    let prefix = r#"[{"consumer":"x","tracked":1,"changed":0,"last_marked":"#;
+    let rest = out
+        .trim()
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.strip_suffix("}]"))
+        .unwrap_or_else(|| panic!("unexpected status shape: {out}"));
+    let marked: u64 = rest.parse().expect("last_marked is unix seconds");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    assert!(
+        now.saturating_sub(marked) < 60,
+        "the mark just happened: {marked} against now {now}"
+    );
+}
+
+#[test]
+fn status_reports_last_mark() {
+    let repo = mk_repo("status_reports_last_mark");
+    let dir = repo.path();
+
+    write(dir, "a.txt", b"a\n");
+    glean(dir, &["mark", "--as", "x"]);
+
+    let status = lines(&glean(dir, &["status"]).0);
+    assert_eq!(status, vec!["x: 1 tracked, 0 changed, last mark just now"]);
+
+    // A consumer with no state file has never marked, so there is no mtime.
+    let (out, code) = glean(dir, &["status", "--as", "nobody", "--json"]);
+    assert!(code.success());
+    assert_eq!(
+        out.trim(),
+        r#"[{"consumer":"nobody","tracked":0,"changed":1,"last_marked":null}]"#
+    );
 }
 
 #[test]
@@ -576,7 +610,11 @@ fn consumer_flag_is_global() {
 
     let (out, status) = glean(dir, &["status", "--as=x", "--json"]);
     assert!(status.success());
-    assert_eq!(out.trim(), r#"[{"consumer":"x","tracked":1,"changed":0}]"#);
+    assert!(
+        out.trim()
+            .starts_with(r#"[{"consumer":"x","tracked":1,"changed":0"#),
+        "--as before the subcommand reads the same baseline: {out}"
+    );
 }
 
 // A mistyped flag used to be read as a path, silently dropping that entry from

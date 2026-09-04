@@ -7,7 +7,7 @@
 // carries paths and nothing else. Exit codes carry the same discipline: `list
 // -q` returns 1 for "nothing changed", which is why a real failure exits 2.
 
-use crate::ink::{marked_files, removed, Ink};
+use crate::ink::{ago, marked_files, removed, Ink};
 use crate::repo::Repo;
 use crate::DEFAULT_CONSUMER;
 use anyhow::{Context, Result};
@@ -83,13 +83,18 @@ pub fn status(consumer: Option<&str>, json: bool) -> Result<i32> {
                 0 => ink.dim("0"),
                 n => ink.yellow(&n.to_string()),
             };
+            let when = match s.last_marked {
+                Some(secs) => format!("last mark {}", ago(secs)),
+                None => "never marked".to_string(),
+            };
             println!(
-                "{}: {} {} {} {}",
+                "{}: {} {} {} {}{}",
                 ink.cyan(&s.consumer),
                 ink.bold(&s.tracked.to_string()),
                 ink.dim("tracked,"),
                 changed,
-                ink.dim("changed")
+                ink.dim("changed,"),
+                ink.dim(&format!(" {when}"))
             );
         }
     }

@@ -30,7 +30,7 @@ glean <command> [--as <consumer>] [options]
 
   list   [-z] [-q] [--json]        files changed since this consumer's last mark
   mark   [--stdin] [-z] [paths…]   record files as processed; with no paths, the whole changed set
-  status [--json]                  tracked and changed counts; with no --as, every consumer
+  status [--json]                  counts and last mark time; with no --as, every consumer
   reset  [--all]                   forget a baseline to force a full re-sweep
   run    [--each] -- <cmd>…        run <cmd> on the changed files, marking them when it succeeds
   mcp                              serve the change-set as MCP tools over stdio
@@ -68,6 +68,14 @@ Consumers are independent. When a file changes, every consumer that has not seen
 glean list --as slop        # code smells
 glean list --as simplify    # structure
 glean list --as check       # type checking
+```
+
+`status` reports all of them at once, with how long ago each one last marked — so a consumer showing 0 changed is readable as *sweep finished minutes ago* rather than *never ran*:
+
+```sh
+$ glean status
+simplify: 106 tracked, 0 changed, last mark 3h ago
+slop: 106 tracked, 1 changed, last mark 12m ago
 ```
 
 ## Claude Code
@@ -137,7 +145,7 @@ glean list -q --as clippy && cargo clippy && glean mark --as clippy
 
 - `glean_list` — paths changed since a consumer last marked them.
 - `glean_mark` — record paths as processed; omit `paths` to mark the whole changed set.
-- `glean_status` — tracked and changed counts per consumer.
+- `glean_status` — tracked and changed counts per consumer, plus how long ago it last marked.
 
 `run` is not exposed: the MCP surface reads and advances the cursor, it does not execute commands.
 

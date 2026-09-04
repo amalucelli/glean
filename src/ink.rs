@@ -58,6 +58,22 @@ impl Ink {
     }
 }
 
+// How long ago a unix-seconds instant was, at the coarsest unit that still says
+// something. A clock that moved backwards since the mark reads as "just now"
+// rather than a negative age.
+pub fn ago(unix_secs: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let secs = now.saturating_sub(unix_secs);
+    match secs {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86400),
+    }
+}
+
 pub fn removed(path: &Path) -> String {
     let ink = Ink::stderr();
     format!(

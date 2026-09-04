@@ -50,6 +50,8 @@ pub struct ConsumerStatus {
     pub consumer: String,
     pub tracked: usize,
     pub changed: usize,
+    // Unix seconds; None when the consumer has no state file yet.
+    pub last_marked: Option<u64>,
 }
 
 pub struct Repo {
@@ -156,9 +158,26 @@ impl Repo {
                 consumer: name.clone(),
                 tracked: state.clean.len(),
                 changed: Self::changed_paths(&current, &state).len(),
+                last_marked: self.last_marked(name),
             });
         }
         Ok(out)
+    }
+
+    // `mark` is the only writer of a state file, so its mtime is when this
+    // consumer last marked — no timestamp has to be stored, and baselines
+    // written by older versions report one too. A CI cache that restores the
+    // file without its mtime reports the restore instead.
+    fn last_marked(&self, consumer: &str) -> Option<u64> {
+        let modified = std::fs::metadata(self.state_path(consumer))
+            .and_then(|meta| meta.modified())
+            .ok()?;
+        Some(
+            modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs(),
+        )
     }
 
     fn candidates(&self) -> Result<Vec<String>> {
